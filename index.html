@@ -12,38 +12,51 @@
     </header>
 
     <div class="container">
-      <input id="searchInput" placeholder="Введите название фильма..." />
+      <div class="search-wrapper">
+        <input id="searchInput" placeholder="Введите название фильма..." />
+        <button id="searchBtn">Поиск</button>
+      </div>
 
       <div class="tabs">
-        <button class="tab active" data-tab="recent">
-          Результат последнего поиска
-        </button>
+        <button class="tab active" data-tab="recent">Результат поиска</button>
         <button class="tab" data-tab="favorites">
           ⭐ Избранное <span id="favCount">(0)</span>
         </button>
+
         <div id="sortSelectWraper">
           <select id="sortSelect">
-            <!-- <option value="">Без сортировки</option> -->
             <option value="title">По названию</option>
             <option value="year">По году</option>
-            <option value="genre">По жанру</option>
           </select>
         </div>
-        <button id="clearHistory">🗑</button>
+
+        <button
+          id="clearHistory"
+          class="tab btn-danger"
+          title="Очистить историю"
+        >
+          Очистить историю
+        </button>
       </div>
 
-      <input
-        id="favSearch"
-        class="fav-search"
-        placeholder="Поиск в избранном..."
-      />
-
       <section id="grid" class="grid"></section>
+
+      <div
+        id="paginationContainer"
+        class="pagination-container"
+        style="display: none"
+      >
+        <p id="progressText"></p>
+        <div class="progress-bar-bg">
+          <div id="progressBar" class="progress-bar-fill"></div>
+        </div>
+        <button id="loadMoreBtn" class="load-more-btn">Показать ещё</button>
+      </div>
     </div>
 
     <div id="modal" class="modal hidden">
       <div class="modal-content">
-        <button class="close">&times;</button>
+        <span class="close">&times;</span>
         <div id="modalBody"></div>
       </div>
     </div>

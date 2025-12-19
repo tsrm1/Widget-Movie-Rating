@@ -4,12 +4,14 @@
 
   const grid = $("#grid");
   const modal = $("#modal");
-  const modalBody = $("#modalBody");
   const favCount = $("#favCount");
-  const favSearch = $("#favSearch");
   const sortSelect = $("#sortSelect");
+  const paginationContainer = $("#paginationContainer");
+  const loadMoreBtn = $("#loadMoreBtn");
+  const progressText = $("#progressText");
+  const progressBar = $("#progressBar");
+  const searchInput = $("#searchInput");
 
-  // Создаем элемент лоадера программно
   const loader = document.createElement("div");
   loader.className = "loader";
 
@@ -18,11 +20,13 @@
     movies: [],
     favorites: JSON.parse(localStorage.getItem("favorites") || "[]"),
     cache: JSON.parse(localStorage.getItem("movieCache") || "{}"),
+    currentQuery: "",
+    currentPage: 1,
+    totalResults: 0,
   };
 
-  // Функции управления индикатором загрузки
-  function showLoader() {
-    grid.innerHTML = "";
+  function showLoader(fullClear = true) {
+    if (fullClear) grid.innerHTML = "";
     grid.appendChild(loader);
     loader.style.display = "block";
   }
@@ -36,60 +40,57 @@
       localStorage.setItem(key, JSON.stringify(value));
     } catch (e) {
       if (e.name === "QuotaExceededError") {
-        if (localStorage.getItem("movieCache")) {
-          state.cache = {};
-          localStorage.removeItem("movieCache");
-        } else if (localStorage.getItem("lastSearch")) {
-          localStorage.removeItem("lastSearch");
-        }
-        try {
-          localStorage.setItem(key, JSON.stringify(value));
-        } catch (retryError) {
-          alert("Память заполнена.");
-        }
+        localStorage.removeItem("movieCache");
+        state.cache = {};
+        localStorage.setItem(key, JSON.stringify(value));
       }
     }
   }
 
-  function saveEssential() {
-    safeSave("favorites", state.favorites);
-    safeSave("movieCache", state.cache);
-  }
-
   async function getMovie(id) {
     if (state.cache[id]) return state.cache[id];
-
-    // Показываем лоадер только если данных нет в кэше
-    showLoader();
     try {
       const res = await fetch(
         `https://www.omdbapi.com/?apikey=${API_KEY}&i=${id}&plot=full`
       );
       const data = await res.json();
       if (data.Response === "True") {
-        const keys = Object.keys(state.cache);
-        if (keys.length > 50) delete state.cache[keys[0]];
         state.cache[id] = data;
-        saveEssential();
+        safeSave("movieCache", state.cache);
         return data;
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      hideLoader();
+    } catch (e) {
+      return null;
     }
-    return null;
   }
 
-  function render(list) {
-    hideLoader();
-    grid.innerHTML = "";
-    const sortedList = sortMovies(list);
-
-    if (!sortedList.length) {
-      grid.innerHTML = "<p>Ничего не найдено</p>";
-      return;
+  function updatePaginationUI() {
+    // Пагинация видна ТОЛЬКО если был совершен поиск в текущей сессии
+    if (
+      state.tab === "recent" &&
+      state.totalResults > 0 &&
+      state.currentQuery !== ""
+    ) {
+      paginationContainer.style.display = "flex";
+      const loaded = state.movies.length;
+      progressText.textContent = `Показано ${loaded} из ${state.totalResults}`;
+      progressBar.style.width = `${Math.min(
+        (loaded / state.totalResults) * 100,
+        100
+      )}%`;
+      loadMoreBtn.style.display =
+        loaded >= state.totalResults ? "none" : "block";
+    } else {
+      paginationContainer.style.display = "none";
     }
+  }
+
+  function render(list, append = false) {
+    hideLoader();
+    if (!append) grid.innerHTML = "";
+
+    const sortedList = sortMovies(list);
+    const fragment = document.createDocumentFragment();
 
     sortedList.forEach((m) => {
       const card = document.createElement("div");
@@ -97,9 +98,11 @@
       const isFav = state.favorites.includes(m.imdbID);
 
       card.innerHTML = `
-        <img src="${m.Poster !== "N/A" ? m.Poster : ""}" alt="${
-        m.Title
-      }" onerror="this.src='https://via.placeholder.com/300x450?text=No+Poster'">
+        ${
+          m.Poster && m.Poster !== "N/A"
+            ? `<img src="${m.Poster}" alt="${m.Title}" loading="lazy">`
+            : `<div class="fallback">🎬</div>`
+        }
         <div class="card-content">
           <h3>${m.Title}</h3>
           <span>${m.Year}</span>
@@ -107,87 +110,123 @@
         <span class="favorite">${isFav ? "★" : "☆"}</span>
       `;
 
-      card.querySelector(".favorite").onclick = async (e) => {
+      const favBtn = card.querySelector(".favorite");
+      favBtn.onclick = async (e) => {
         e.stopPropagation();
         if (state.favorites.includes(m.imdbID)) {
           state.favorites = state.favorites.filter((id) => id !== m.imdbID);
+          favBtn.textContent = "☆";
         } else {
           state.favorites.push(m.imdbID);
+          favBtn.textContent = "★";
           await getMovie(m.imdbID);
         }
-        saveEssential();
-        updateFavCount();
-        renderCurrentTab();
+        safeSave("favorites", state.favorites);
+        favCount.textContent = `(${state.favorites.length})`;
+        if (state.tab === "favorites") renderCurrentTab();
       };
 
       card.onclick = async () => {
         const fullData = await getMovie(m.imdbID);
         if (fullData) openModal(fullData);
       };
-      grid.appendChild(card);
+      fragment.appendChild(card);
     });
+
+    grid.appendChild(fragment);
+    updatePaginationUI();
   }
 
   function sortMovies(list) {
     const type = sortSelect.value;
-    const sorted = [...list];
-    if (type === "title")
-      sorted.sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
-    if (type === "year")
-      sorted.sort((a, b) => parseInt(b.Year || 0) - parseInt(a.Year || 0));
-    return sorted;
+    return [...list].sort((a, b) => {
+      if (type === "title") return a.Title.localeCompare(b.Title);
+      if (type === "year") return parseInt(b.Year) - parseInt(a.Year);
+      return 0;
+    });
   }
 
-  function renderCurrentTab() {
-    favSearch.style.display = state.tab === "favorites" ? "block" : "none";
-    if (state.tab === "recent") {
-      render(JSON.parse(localStorage.getItem("lastSearch") || "[]"));
-    } else {
-      render(state.favorites.map((id) => state.cache[id]).filter(Boolean));
+  async function fetchMovies(query, page = 1) {
+    if (page === 1) showLoader();
+    else {
+      loadMoreBtn.disabled = true;
+      loadMoreBtn.textContent = "Загрузка...";
+    }
+
+    try {
+      const res = await fetch(
+        `https://www.omdbapi.com/?apikey=${API_KEY}&s=${query}&page=${page}`
+      );
+      const data = await res.json();
+
+      if (data.Response === "True") {
+        state.totalResults = parseInt(data.totalResults);
+        state.movies =
+          page === 1 ? data.Search : [...state.movies, ...data.Search];
+
+        safeSave("lastSearch", state.movies);
+        safeSave("lastTotal", state.totalResults);
+        render(data.Search, page > 1);
+      } else if (page === 1) {
+        grid.innerHTML = `<p style="text-align:center; width:100%">${data.Error}</p>`;
+        state.totalResults = 0;
+        updatePaginationUI();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      hideLoader();
+      loadMoreBtn.disabled = false;
+      loadMoreBtn.textContent = "Показать ещё";
     }
   }
 
-  function updateFavCount() {
-    favCount.textContent = `(${state.favorites.length})`;
+  const startSearch = () => {
+    state.currentQuery = searchInput.value.trim();
+    if (!state.currentQuery) return;
+    state.currentPage = 1;
+    fetchMovies(state.currentQuery, 1);
+  };
+
+  $("#searchBtn").onclick = startSearch;
+  searchInput.onkeydown = (e) => {
+    if (e.key === "Enter") startSearch();
+  };
+
+  loadMoreBtn.onclick = () => {
+    state.currentPage++;
+    fetchMovies(state.currentQuery, state.currentPage);
+  };
+
+  function renderCurrentTab() {
+    if (state.tab === "recent") {
+      state.movies = JSON.parse(localStorage.getItem("lastSearch") || "[]");
+      state.totalResults = parseInt(localStorage.getItem("lastTotal") || "0");
+      render(state.movies);
+    } else {
+      const favs = state.favorites.map((id) => state.cache[id]).filter(Boolean);
+      render(favs);
+    }
   }
 
   function openModal(m) {
-    modalBody.innerHTML = `
-      <div class="modal-body">
-        <img src="${m.Poster !== "N/A" ? m.Poster : ""}" alt="${m.Title}">
-        <div>
-          <h2>${m.Title} (${m.Year})</h2>
-          <p><b>Genre:</b> ${m.Genre}</p>
-          <p><b>IMDb:</b> ⭐ ${m.imdbRating}</p>
-          <p>${m.Plot}</p>
+    $("#modalBody").innerHTML = `
+      <div style="display:flex; gap:30px; flex-wrap:wrap">
+        <img src="${
+          m.Poster !== "N/A" ? m.Poster : ""
+        }" style="max-width:250px; border-radius:10px">
+        <div style="flex:1; min-width:300px">
+          <h2 style="margin-bottom:15px">${m.Title} (${m.Year})</h2>
+          <p><b>Рейтинг:</b> ⭐ ${m.imdbRating}</p>
+          <p><b>Жанр:</b> ${m.Genre}</p>
+          <p><b>Актеры:</b> ${m.Actors}</p>
+          <p style="margin-top:20px; color:#cbd5e1; line-height:1.6">${
+            m.Plot
+          }</p>
         </div>
-      </div>
-    `;
+      </div>`;
     modal.classList.remove("hidden");
   }
-
-  $("#searchInput").addEventListener("keydown", async (e) => {
-    if (e.key !== "Enter") return;
-    const q = e.target.value.trim();
-    if (!q) return;
-
-    showLoader();
-    try {
-      const res = await fetch(
-        `https://www.omdbapi.com/?apikey=${API_KEY}&s=${q}`
-      );
-      const data = await res.json();
-      if (data.Search) {
-        safeSave("lastSearch", data.Search);
-        render(data.Search);
-      } else {
-        render([]);
-      }
-    } catch (err) {
-      console.error(err);
-      hideLoader();
-    }
-  });
 
   document.querySelectorAll(".tab").forEach((t) => {
     t.onclick = () => {
@@ -201,16 +240,23 @@
   });
 
   $("#clearHistory").onclick = () => {
+    if (!confirm("Очистить историю поиска?")) return;
     localStorage.removeItem("lastSearch");
-    if (state.tab === "recent") render([]);
+    localStorage.removeItem("lastTotal");
+    state.movies = [];
+    state.totalResults = 0;
+    state.currentQuery = "";
+    searchInput.value = "";
+    renderCurrentTab();
   };
 
   modal.onclick = (e) => {
-    if (e.target === modal || e.target.classList.contains("close"))
+    if (e.target === modal || e.target.className === "close")
       modal.classList.add("hidden");
   };
-
   sortSelect.onchange = renderCurrentTab;
-  updateFavCount();
+
+  // При старте
+  favCount.textContent = `(${state.favorites.length})`;
   renderCurrentTab();
 })();
