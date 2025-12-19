@@ -1,49 +1,105 @@
 (() => {
   const API_KEY = "5dd58b01";
   const $ = (s) => document.querySelector(s);
+
   const grid = $("#grid");
   const modal = $("#modal");
   const modalBody = $("#modalBody");
   const favCount = $("#favCount");
   const favSearch = $("#favSearch");
+  const sortSelect = $("#sortSelect");
+
+  // Инициализация состояния с безопасным чтением из LocalStorage
   let state = {
     tab: "recent",
     movies: [],
-    favorites: JSON.parse(localStorage.getItem("favorites")) || [],
-    favoriteMovies: JSON.parse(localStorage.getItem("favoriteMovies")) || {},
-    cache: JSON.parse(localStorage.getItem("movieCache")) || {},
+    // Загружаем только ID избранного, чтобы не дублировать объекты
+    favorites: JSON.parse(localStorage.getItem("favorites") || "[]"),
+    // Кэш подробных данных о фильмах с проверкой на null
+    cache: JSON.parse(localStorage.getItem("movieCache") || "{}"),
   };
 
-  function save() {
-    localStorage.setItem("favorites", JSON.stringify(state.favorites));
-    localStorage.setItem(
-      "favoriteMovies",
-      JSON.stringify(state.favoriteMovies)
-    );
-    localStorage.setItem("movieCache", JSON.stringify(state.cache));
+  /**
+   * Каскадная очистка данных при переполнении LocalStorage.
+   * Если место заканчивается, поочередно удаляются: кэш, затем история поиска.
+   */
+  function safeSave(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      if (e.name === "QuotaExceededError") {
+        console.warn("Экстренная очистка: LocalStorage переполнен.");
+
+        // Уровень 1: Удаляем тяжелый кэш подробных данных
+        if (localStorage.getItem("movieCache")) {
+          state.cache = {};
+          localStorage.removeItem("movieCache");
+          console.log("Уровень 1: Кэш фильмов удален.");
+        }
+        // Уровень 2: Удаляем историю последнего поиска
+        else if (localStorage.getItem("lastSearch")) {
+          localStorage.removeItem("lastSearch");
+          console.log("Уровень 2: История поиска удалена.");
+        }
+
+        // Повторная попытка сохранить критические данные (например, Избранное)
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (retryError) {
+          console.error("Критическая ошибка: место не освободилось.");
+          alert(
+            "Не удалось сохранить данные: память браузера полностью заполнена."
+          );
+        }
+      }
+    }
+  }
+
+  function saveEssential() {
+    safeSave("favorites", state.favorites);
+    safeSave("movieCache", state.cache);
   }
 
   function updateFavCount() {
-    state.favorites = Object.keys(state.favoriteMovies);
     favCount.textContent = `(${state.favorites.length})`;
   }
 
+  /**
+   * Получение данных о фильме с использованием LRU-кэширования.
+   * Ограничивает кэш до 50 записей, чтобы избежать раздувания хранилища.
+   */
   async function getMovie(id) {
     if (state.cache[id]) return state.cache[id];
-    const res = await fetch(
-      `https://www.omdbapi.com/?apikey=${API_KEY}&i=${id}&plot=full`
-    );
-    const data = await res.json();
-    state.cache[id] = data;
-    save();
-    return data;
+
+    try {
+      const res = await fetch(
+        `https://www.omdbapi.com/?apikey=${API_KEY}&i=${id}&plot=full`
+      );
+      const data = await res.json();
+
+      if (data.Response === "True") {
+        const keys = Object.keys(state.cache);
+        // Логика LRU: удаляем самую старую запись при превышении лимита
+        if (keys.length > 50) {
+          delete state.cache[keys[0]];
+        }
+        state.cache[id] = data;
+        saveEssential();
+        return data;
+      }
+    } catch (err) {
+      console.error("Ошибка API:", err);
+    }
+    return null;
   }
 
   function sortMovies(list) {
-    const type = $("#sortSelect").value;
+    const type = sortSelect.value;
     const sorted = [...list];
-    if (type === "title") sorted.sort((a, b) => a.Title.localeCompare(b.Title));
-    if (type === "year") sorted.sort((a, b) => Number(b.Year) - Number(a.Year));
+    if (type === "title")
+      sorted.sort((a, b) => (a.Title || "").localeCompare(b.Title || ""));
+    if (type === "year")
+      sorted.sort((a, b) => parseInt(b.Year || 0) - parseInt(a.Year || 0));
     if (type === "genre")
       sorted.sort((a, b) => (a.Genre || "").localeCompare(b.Genre || ""));
     return sorted;
@@ -52,8 +108,9 @@
   function render(list) {
     grid.innerHTML = "";
     const sortedList = sortMovies(list);
+
     if (!sortedList.length) {
-      grid.innerHTML = "<p>Ничего не найдено</p>";
+      grid.innerHTML = "<p>Список пуст</p>";
       return;
     }
 
@@ -61,7 +118,8 @@
       const card = document.createElement("div");
       card.className = "card";
 
-      const fav = state.favorites.includes(m.imdbID);
+      const isFav = state.favorites.includes(m.imdbID);
+
       const img = document.createElement("img");
       img.src = m.Poster !== "N/A" ? m.Poster : "";
       img.alt = m.Title;
@@ -80,68 +138,60 @@
 
       const favSpan = document.createElement("span");
       favSpan.className = "favorite";
-      favSpan.textContent = fav ? "★" : "☆";
+      favSpan.textContent = isFav ? "★" : "☆";
       favSpan.onclick = async (e) => {
         e.stopPropagation();
         if (state.favorites.includes(m.imdbID)) {
           state.favorites = state.favorites.filter((id) => id !== m.imdbID);
-          delete state.favoriteMovies[m.imdbID];
         } else {
           state.favorites.push(m.imdbID);
-          state.favoriteMovies[m.imdbID] = await getMovie(m.imdbID);
+          // Предварительно кэшируем полные данные для избранного
+          await getMovie(m.imdbID);
         }
-        save();
+        saveEssential();
         updateFavCount();
         renderCurrentTab();
       };
       card.appendChild(favSpan);
 
-      card.onclick = async () => openModal(await getMovie(m.imdbID));
+      card.onclick = async () => {
+        const fullData = await getMovie(m.imdbID);
+        if (fullData) openModal(fullData);
+      };
       grid.appendChild(card);
     });
   }
 
-  function renderFavorites() {
-    favSearch.style.display = "block";
-    render(Object.values(state.favoriteMovies));
-  }
-
   function renderCurrentTab() {
-    favSearch.style.display = "none";
-    if (state.tab === "recent")
-      render(JSON.parse(localStorage.getItem("lastSearch")) || []);
-    if (state.tab === "favorites") renderFavorites();
+    favSearch.style.display = state.tab === "favorites" ? "block" : "none";
+
+    if (state.tab === "recent") {
+      // Надежное чтение истории поиска с дефолтным значением
+      const lastSearch = JSON.parse(localStorage.getItem("lastSearch") || "[]");
+      render(lastSearch);
+    } else if (state.tab === "favorites") {
+      // Собираем данные из кэша на основе сохраненных ID избранного
+      const favList = state.favorites
+        .map((id) => state.cache[id])
+        .filter((movie) => movie !== undefined);
+      render(favList);
+    }
   }
 
-  async function openModal(m) {
-    modalBody.innerHTML = "";
-    const modalContent = document.createElement("div");
-    modalContent.className = "modal-body";
-
-    const poster = document.createElement("img");
-    poster.src = m.Poster !== "N/A" ? m.Poster : "";
-    poster.alt = m.Title;
-    poster.onerror = () => {
-      const fb = document.createElement("div");
-      fb.className = "fallback";
-      fb.style.height = "300px";
-      fb.textContent = "✖";
-      poster.replaceWith(fb);
-    };
-    modalContent.appendChild(poster);
-
-    const textDiv = document.createElement("div");
-    textDiv.innerHTML = `
-    <h2>${m.Title} (${m.Year})</h2>
-    <p><b>Genre:</b> ${m.Genre}</p>
-    <p><b>IMDb:</b> ⭐ ${m.imdbRating}</p>
-    <p><b>Runtime:</b> ${m.Runtime}</p>
-    <p><b>Actors:</b> ${m.Actors}</p>
-    <p>${m.Plot}</p>
-  `;
-    modalContent.appendChild(textDiv);
-
-    modalBody.appendChild(modalContent);
+  function openModal(m) {
+    modalBody.innerHTML = `
+      <div class="modal-body">
+        <img src="${m.Poster !== "N/A" ? m.Poster : ""}" alt="${m.Title}">
+        <div>
+          <h2>${m.Title} (${m.Year})</h2>
+          <p><b>Genre:</b> ${m.Genre}</p>
+          <p><b>IMDb:</b> ⭐ ${m.imdbRating}</p>
+          <p><b>Runtime:</b> ${m.Runtime}</p>
+          <p><b>Actors:</b> ${m.Actors}</p>
+          <p>${m.Plot}</p>
+        </div>
+      </div>
+    `;
     modal.classList.remove("hidden");
   }
 
@@ -149,28 +199,33 @@
     if (e.key !== "Enter") return;
     const q = e.target.value.trim();
     if (!q) return;
-    const res = await fetch(
-      `https://www.omdbapi.com/?apikey=${API_KEY}&s=${q}`
-    );
-    const data = await res.json();
-    if (data.Search) {
-      state.movies = data.Search;
-      localStorage.setItem("lastSearch", JSON.stringify(data.Search));
-      render(data.Search);
+
+    try {
+      const res = await fetch(
+        `https://www.omdbapi.com/?apikey=${API_KEY}&s=${q}`
+      );
+      const data = await res.json();
+      if (data.Search) {
+        state.movies = data.Search;
+        // Используем safeSave для сохранения результатов поиска
+        safeSave("lastSearch", data.Search);
+        render(data.Search);
+      }
+    } catch (err) {
+      console.error("Ошибка поиска:", err);
     }
   });
 
-  document.querySelectorAll(".tab").forEach(
-    (t) =>
-      (t.onclick = () => {
-        document
-          .querySelectorAll(".tab")
-          .forEach((x) => x.classList.remove("active"));
-        t.classList.add("active");
-        state.tab = t.dataset.tab;
-        renderCurrentTab();
-      })
-  );
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.onclick = () => {
+      document
+        .querySelectorAll(".tab")
+        .forEach((x) => x.classList.remove("active"));
+      t.classList.add("active");
+      state.tab = t.dataset.tab;
+      renderCurrentTab();
+    };
+  });
 
   $("#clearHistory").onclick = () => {
     localStorage.removeItem("lastSearch");
@@ -179,11 +234,10 @@
 
   favSearch.oninput = () => {
     const q = favSearch.value.toLowerCase();
-    render(
-      Object.values(state.favoriteMovies).filter((m) =>
-        m.Title.toLowerCase().includes(q)
-      )
-    );
+    const filtered = state.favorites
+      .map((id) => state.cache[id])
+      .filter((m) => m && m.Title.toLowerCase().includes(q));
+    render(filtered);
   };
 
   modal.onclick = (e) => {
@@ -191,8 +245,15 @@
       modal.classList.add("hidden");
   };
 
-  $("#sortSelect").onchange = renderCurrentTab;
+  sortSelect.onchange = renderCurrentTab;
 
+  // Инициализация интерфейса
   updateFavCount();
-  render(JSON.parse(localStorage.getItem("lastSearch")) || []);
+  renderCurrentTab();
 })();
+// Как теперь работает стратегия управления памятью:
+// Превентивная мера (LRU-кэш): В функции getMovie мы сохраняем не более 50 последних фильмов. Это предотвращает раздувание базы при обычном использовании.
+// Первый уровень защиты (Очистка кэша): Если при добавлении в избранное возникает ошибка, safeSave первым делом удаляет movieCache. Это освобождает значительный объем данных, так как полные описания фильмов с сюжетом и ссылками на постеры занимают много места.
+// Второй уровень защиты (Очистка истории): Если удаление кэша не помогло, система жертвует историей последнего поиска (lastSearch).
+// Приоритет данных: Система до последнего пытается сохранить массив favorites, так как это персональные данные пользователя, которые труднее всего восстановить.
+// При возникновении ошибки переполнения в консоли увидим отчет о том, какие именно данные были удалены для спасения работоспособности приложения.
