@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MovieFinder — Поиск фильмов</title>
+    <link rel="stylesheet" href="/styles/style.css" />
+  </head>
+  <body>
+    <header>
+      <h2>🎬 MovieSearch</h2>
+    </header>
+
+    <div class="container">
+      <input id="searchInput" placeholder="Введите название фильма..." />
+
+      <div class="tabs">
+        <button class="tab active" data-tab="recent">
+          Результат последнего поиска
+        </button>
+        <button class="tab" data-tab="favorites">
+          ⭐ Избранное <span id="favCount">(0)</span>
+        </button>
+        <div id="sortSelectWraper">
+          <select id="sortSelect">
+            <!-- <option value="">Без сортировки</option> -->
+            <option value="title">По названию</option>
+            <option value="year">По году</option>
+            <option value="genre">По жанру</option>
+          </select>
+        </div>
+        <!-- <div class="sort-tabs">
+          <button class="sort-tab active" data-sort="">Без сортировки</button>
+          <button class="sort-tab" data-sort="title">По названию</button>
+          <button class="sort-tab" data-sort="year">По году</button>
+          <button class="sort-tab" data-sort="genre">По жанру</button>
+        </div> -->
+        <button id="clearHistory">🗑</button>
+      </div>
+
+      <input
+        id="favSearch"
+        class="fav-search"
+        placeholder="Поиск в избранном..."
+      />
+
+      <section id="grid" class="grid"></section>
+    </div>
+
+    <div id="modal" class="modal hidden">
+      <div class="modal-content">
+        <button class="close">&times;</button>
+        <div id="modalBody"></div>
+      </div>
+    </div>
+
+    <script src="/scripts/script.js"></script>
+  </body>
+</html>
