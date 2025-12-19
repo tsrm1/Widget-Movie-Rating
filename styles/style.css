@@ -44,6 +44,7 @@ input {
 
 .tabs {
   display: flex;
+  align-items: center;
   gap: 10px;
   margin: 20px 0;
 }
@@ -67,41 +68,25 @@ input {
   border-radius: 20px;
   background: var(--accent);
   padding: 10px 18px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 #sortSelect {
-  /* margin: 10px; */
   border: none;
   background: var(--accent);
   color: #020617;
   font-weight: 600;
   cursor: pointer;
+  font-size: 14px;
+  height: 100%;
 }
-/* .sort-tabs {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 15px;
-}
-
-.sort-tab {
-  padding: 8px 16px;
-  border-radius: 20px;
-  background: none;
-  border: 1px solid #334155;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.sort-tab.active {
-  background: var(--accent);
-  color: #020617;
-  font-weight: 600;
-} */
 
 #clearHistory {
   margin-left: auto;
   background: none;
   border: none;
-  font-size: 18px;
+  font-size: 42px;
   cursor: pointer;
   color: var(--text);
 }
@@ -169,7 +154,7 @@ input {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: #334155; /* тёмный фон */
+  background: #334155;
   color: red;
   font-size: 48px;
   font-weight: bold;
